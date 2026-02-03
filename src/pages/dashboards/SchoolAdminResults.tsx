@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { PageHeader, Section, ContentCard } from '@/components/dashboard/PageHeader';
 import { LayoutDashboard, GraduationCap, Users, BookOpen, FileText, BarChart3, Settings, Calculator, Printer, Save, AlertCircle, Eye, X, Share, ChevronDown, Check } from 'lucide-react';
@@ -11,6 +11,8 @@ import { database } from '@/lib/firebase';
 import { ref, query, orderByChild, equalTo, onValue, get, update } from 'firebase/database';
 import { useToast } from '@/hooks/use-toast';
 import { GradeBadge, StatusBadge } from '@/components/dashboard/StatusBadge';
+import { SubjectGroupManager } from '@/components/SubjectGroupManager';
+import { fetchSubjectGroups, SubjectGroup } from '@/lib/subject-grouping';
 
 const navItems = [
   { title: 'Dashboard', href: '/school-admin', icon: LayoutDashboard },
@@ -82,6 +84,9 @@ export default function SchoolAdminResults() {
   const [showMarks, setShowMarks] = useState(false);
   const [selectedStudentResult, setSelectedStudentResult] = useState<ProcessedResult | null>(null);
   const [schoolLogo, setSchoolLogo] = useState<string | null>(null);
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [subjectGroups, setSubjectGroups] = useState<SubjectGroup[]>([]);
+  const [displaySubjects, setDisplaySubjects] = useState<any[]>([]);
 
   // Fetch Initial Data
   useEffect(() => {
@@ -161,6 +166,15 @@ export default function SchoolAdminResults() {
     }
   }, [user?.schoolId, selectedClass, selectedSections]);
 
+  // Fetch Subject Groups when Class Selected
+  useEffect(() => {
+    if (user?.schoolId && selectedClass) {
+      fetchSubjectGroups(user.schoolId, selectedClass).then(setSubjectGroups);
+    } else {
+      setSubjectGroups([]);
+    }
+  }, [user?.schoolId, selectedClass]);
+
   const toggleSection = (sectionId: string) => {
     setSelectedSections(prev => {
       if (prev.includes(sectionId)) {
@@ -169,6 +183,8 @@ export default function SchoolAdminResults() {
         return [...prev, sectionId];
       }
     });
+    setCalculated(false);
+    setResults([]);
   };
 
   const handleExamSelection = (examId: string, isChecked: boolean) => {
@@ -177,6 +193,8 @@ export default function SchoolAdminResults() {
     } else {
       setSelectedExams(prev => prev.filter(e => e.examId !== examId));
     }
+    setCalculated(false);
+    setResults([]);
   };
 
   const handleWeightChange = (examId: string, weight: string) => {
@@ -233,6 +251,21 @@ export default function SchoolAdminResults() {
         }
       }
 
+      // Prepare Display Subjects (Individual + Groups)
+      const groupedSubjectIds = new Set(subjectGroups.flatMap(g => g.subjectIds));
+      const visibleIndividualSubjects = subjects.filter(s => !groupedSubjectIds.has(s.subjectId));
+      const visibleGroupSubjects = subjectGroups.map(g => ({
+        subjectId: `group_${g.id}`,
+        subjectName: g.name,
+        mcqMarks: 0,
+        writtenMarks: g.totalFullMarks,
+        isFourth: false, // Groups are typically main subjects
+        fullMarks: g.totalFullMarks
+      }));
+      
+      const currentDisplaySubjects = [...visibleIndividualSubjects, ...visibleGroupSubjects];
+      setDisplaySubjects(currentDisplaySubjects);
+
       for (const student of students) {
         const studentSection = sections.find(s => s.id === student.sectionId);
         const studentResult: ProcessedResult = {
@@ -257,6 +290,7 @@ export default function SchoolAdminResults() {
         let mandatorySubjectCount = 0;
         let fourthSubjectBonus = 0;
 
+        // 1. Calculate Raw Results for ALL subjects (including those that will be hidden)
         for (const subject of subjects) {
           let weightedMCQ = 0;
           let weightedWritten = 0;
@@ -309,6 +343,62 @@ export default function SchoolAdminResults() {
             isFourth: isFourthSubject,
             examBreakdown
           };
+        }
+
+        // 2. Apply Grouping Logic
+        subjectGroups.forEach(group => {
+          let groupObtained = 0;
+          let groupMCQ = 0;
+          let groupWritten = 0;
+          let hasData = false;
+          const groupExamBreakdown: Record<string, { mcq: number; written: number; weight: number }> = {};
+
+          group.subjectIds.forEach(subId => {
+            const subRes = studentResult.subjectResults[subId];
+            if (subRes) {
+              hasData = true;
+              groupObtained += subRes.total;
+              groupMCQ += subRes.mcq;
+              groupWritten += subRes.written;
+
+              // Aggregate exam breakdown for combined results
+              if (subRes.examBreakdown) {
+                Object.entries(subRes.examBreakdown).forEach(([examId, breakdown]) => {
+                  if (!groupExamBreakdown[examId]) {
+                    groupExamBreakdown[examId] = { mcq: 0, written: 0, weight: breakdown.weight };
+                  }
+                  groupExamBreakdown[examId].mcq += breakdown.mcq;
+                  groupExamBreakdown[examId].written += breakdown.written;
+                });
+              }
+            }
+          });
+
+          if (hasData) {
+            const totalMax = group.totalFullMarks;
+            const { grade, gpa } = getGradePoint(groupObtained, totalMax);
+            
+            studentResult.subjectResults[`group_${group.id}`] = {
+              mcq: groupMCQ,
+              written: groupWritten,
+              total: groupObtained,
+              grade,
+              gpa,
+              isFailed: grade === 'F',
+              isFourth: false,
+              examBreakdown: groupExamBreakdown
+            };
+          }
+        });
+
+        // 3. Calculate Final GPA based on Display Subjects
+        for (const subject of currentDisplaySubjects) {
+          const res = studentResult.subjectResults[subject.subjectId];
+          if (!res) continue;
+
+          const isSubjectFailed = res.isFailed;
+          const isFourthSubject = subject.isFourth;
+          const gpa = res.gpa;
 
           if (isFourthSubject) {
             if (gpa > 2.00) {
@@ -391,8 +481,10 @@ export default function SchoolAdminResults() {
         resultKey = `combined_${Date.now()}`;
       }
 
+      const subjectsToPublish = calculated ? displaySubjects : subjects;
+
       results.forEach(result => {
-        const studentSubjects = subjects.map(sub => {
+        const studentSubjects = subjectsToPublish.map(sub => {
           const subRes = result.subjectResults[sub.subjectId];
           const maxMCQ = parseFloat(sub.mcqMarks || '0');
           const maxWritten = parseFloat(sub.writtenMarks || '0');
@@ -460,7 +552,7 @@ export default function SchoolAdminResults() {
             <div className="grid md:grid-cols-3 gap-4 mb-6">
               <div className="space-y-2">
                 <Label>Class</Label>
-                <Select value={selectedClass} onValueChange={(val) => { setSelectedClass(val); setSelectedSections([]); }}>
+                <Select value={selectedClass} onValueChange={(val) => { setSelectedClass(val); setSelectedSections([]); setCalculated(false); setResults([]); }}>
                   <SelectTrigger><SelectValue placeholder="Select Class" /></SelectTrigger>
                   <SelectContent>{classes.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
                 </Select>
@@ -495,7 +587,7 @@ export default function SchoolAdminResults() {
               </div>
               <div className="space-y-2">
                 <Label>Result Mode</Label>
-                <Select value={resultMode} onValueChange={(v: any) => { setResultMode(v); setSelectedExams([]); }}>
+                <Select value={resultMode} onValueChange={(v: any) => { setResultMode(v); setSelectedExams([]); setCalculated(false); setResults([]); }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="single">Single Exam</SelectItem>
@@ -559,7 +651,7 @@ export default function SchoolAdminResults() {
 
         {/* Results Display */}
         {calculated && (
-          <Section title="2. Result Sheet" headerAction={
+          <Section title="2. Result Sheet6966" headerAction={
             <div className="flex items-center gap-2">
               <div className="flex items-center space-x-2 bg-muted/50 px-3 py-1.5 rounded-md border">
                 <input 
@@ -574,6 +666,9 @@ export default function SchoolAdminResults() {
               <Button variant="outline" size="sm" onClick={() => window.print()}>
                 <Printer className="h-4 w-4 mr-2" /> Print Sheet
               </Button>
+              <Button size="sm" variant="outline" onClick={() => setIsMergeModalOpen(true)}>
+                Merge Subject
+              </Button>
               <Button size="sm" onClick={handlePublish} disabled={loading}>
                 <Share className="h-4 w-4 mr-2" /> Publish Result
               </Button>
@@ -585,7 +680,7 @@ export default function SchoolAdminResults() {
                   <thead className="bg-muted">
                     <tr>
                       <th className="p-3 text-left font-medium sticky left-0 bg-muted">Student</th>
-                      {subjects.map(sub => (
+                      {(calculated ? displaySubjects : subjects).map(sub => (
                         <th key={sub.subjectId} className="p-3 text-center font-medium border-l">
                           {sub.subjectName}
                           <div className="text-[10px] font-normal text-muted-foreground">
@@ -604,7 +699,7 @@ export default function SchoolAdminResults() {
                           <div className="font-medium">{result.studentName}</div>
                           <div className="text-xs text-muted-foreground">Roll: {result.rollNumber}</div>
                         </td>
-                        {subjects.map(sub => {
+                        {(calculated ? displaySubjects : subjects).map(sub => {
                           const subRes = result.subjectResults[sub.subjectId];
                           return (
                             <td key={sub.subjectId} className="p-3 text-center border-l">
@@ -651,6 +746,25 @@ export default function SchoolAdminResults() {
               </div>
             </ContentCard>
           </Section>
+        )}
+
+        {/* Merge Subject Modal */}
+        {user?.schoolId && selectedClass && (
+          <SubjectGroupManager
+            schoolId={user.schoolId}
+            classId={selectedClass}
+            isOpen={isMergeModalOpen}
+            onClose={() => {
+              setIsMergeModalOpen(false);
+              if (user?.schoolId) {
+                fetchSubjectGroups(user.schoolId, selectedClass).then(groups => {
+                  setSubjectGroups(groups);
+                  setCalculated(false);
+                  setResults([]);
+                });
+              }
+            }}
+          />
         )}
 
         {/* Individual Result Modal */}
@@ -748,48 +862,110 @@ export default function SchoolAdminResults() {
                       {resultMode === 'combined' && (
                         <tr>
                           {selectedExams.map(se => (
-                            <>
-                              <th key={`${se.examId}-mcq`} className="p-1 text-center text-xs text-muted-foreground border-l border-t bg-muted/10">MCQ</th>
-                              <th key={`${se.examId}-written`} className="p-1 text-center text-xs text-muted-foreground border-t bg-muted/10">Written</th>
-                            </>
+                            <React.Fragment key={se.examId}>
+                              <th className="p-1 text-center text-xs text-muted-foreground border-l border-t bg-muted/10">MCQ</th>
+                              <th className="p-1 text-center text-xs text-muted-foreground border-t bg-muted/10">Written</th>
+                            </React.Fragment>
                           ))}
                         </tr>
                       )}
                     </thead>
                     <tbody className="divide-y">
-                      {subjects.map(sub => {
-                        const res = selectedStudentResult.subjectResults[sub.subjectId];
-                        return (
-                          <tr key={sub.subjectId}>
-                            <td className="p-3 font-medium">
-                              {sub.subjectName}
-                              {res?.isFourth && <span className="ml-2 text-xs text-muted-foreground">(4th Subject)</span>}
-                            </td>
-                            {resultMode === 'combined' ? (
-                              selectedExams.map(se => {
-                                const breakdown = res?.examBreakdown?.[se.examId];
-                                return (
-                                  <>
-                                    <td key={`${se.examId}-mcq`} className="p-3 text-center border-l text-xs">
-                                      {breakdown ? breakdown.mcq : '-'}
-                                    </td>
-                                    <td key={`${se.examId}-written`} className="p-3 text-center text-xs">
-                                      {breakdown ? breakdown.written : '-'}
-                                    </td>
-                                  </>
-                                );
-                              })
-                            ) : (
-                              <>
-                                <td className="p-3 text-center">{res?.mcq !== undefined ? res.mcq : '-'}</td>
-                                <td className="p-3 text-center">{res?.written !== undefined ? res.written : '-'}</td>
-                              </>
-                            )}
-                            <td className="p-3 text-center font-medium border-l">{res?.total !== undefined ? Math.round(res.total) : '-'}</td>
-                            <td className="p-3 text-center"><GradeBadge grade={res?.grade || '-'} /></td>
-                            <td className="p-3 text-center">{res?.gpa.toFixed(2) || '-'}</td>
-                          </tr>
-                        );
+                      {(calculated ? displaySubjects : subjects).map(sub => {
+                        const isGroup = sub.subjectId.startsWith('group_');
+                        const res = selectedStudentResult.subjectResults[sub.subjectId]; // This is the result for the current item (group or individual subject)
+
+                        if (isGroup) {
+                          const groupId = sub.subjectId.replace('group_', '');
+                          const group = subjectGroups.find(g => g.id === groupId);
+                          if (!group) return null;
+
+                          // res is already the groupResult
+
+                          const constituentSubjects = group.subjectIds.map(id => {
+                            const originalSubject = subjects.find(s => s.subjectId === id);
+                            const originalResult = selectedStudentResult.subjectResults[id];
+                            return { ...originalSubject, result: originalResult };
+                          }).filter(cs => cs.result);
+
+                          if (constituentSubjects.length === 0) return null;
+
+                          return (
+                            <>
+                              {constituentSubjects.map((conSub, index) => (
+                                <tr key={conSub.subjectId}>
+                                  <td className="p-3">
+                                    {index === 0 && <div className="font-medium">{sub.subjectName}</div>}
+                                    <div className="pl-4 text-sm text-muted-foreground">{conSub.subjectName}</div>
+                                  </td>
+                                  {resultMode === 'combined' ? (
+                                    selectedExams.map(se => {
+                                      const breakdown = conSub.result?.examBreakdown?.[se.examId];
+                                      return (
+                                        <React.Fragment key={se.examId}>
+                                          <td className="p-3 text-center border-l text-xs">{breakdown ? breakdown.mcq.toFixed(2) : '-'}</td>
+                                          <td className="p-3 text-center text-xs">{breakdown ? breakdown.written.toFixed(2) : '-'}</td>
+                                        </React.Fragment>
+                                      );
+                                    })
+                                  ) : (
+                                    <>
+                                      <td className="p-3 text-center">{conSub.result?.mcq !== undefined ? conSub.result.mcq.toFixed(2) : '-'}</td>
+                                      <td className="p-3 text-center">{conSub.result?.written !== undefined ? conSub.result.written.toFixed(2) : '-'}</td>
+                                    </>
+                                  )}
+                                  <td className="p-3 text-center border-l text-muted-foreground">{conSub.result?.total !== undefined ? Math.round(conSub.result.total) : '-'}</td>
+                                  <td className="p-3 text-center"></td>
+                                  <td className="p-3 text-center"></td>
+                                </tr>
+                              ))}
+                              <tr key={`${sub.subjectId}-total`} className="bg-muted/50 font-semibold">
+                                <td className="p-3 text-right">Subject Total</td>
+                                {resultMode === 'combined' ? (
+                                  selectedExams.map(se => {
+                                    const groupBreakdown = res?.examBreakdown?.[se.examId];
+                                    return (
+                                    <React.Fragment key={se.examId}>
+                                      <td className="p-3 text-center border-l text-xs">{groupBreakdown ? groupBreakdown.mcq.toFixed(2) : '-'}</td>
+                                      <td className="p-3 text-center text-xs">{groupBreakdown ? groupBreakdown.written.toFixed(2) : '-'}</td>
+                                    </React.Fragment>);
+                                  })
+                                ) : (<>
+                                  <td className="p-3 text-center">{res?.mcq !== undefined ? res.mcq.toFixed(2) : '-'}</td>
+                                  <td className="p-3 text-center">{res?.written !== undefined ? res.written.toFixed(2) : '-'}</td>
+                                </>)}
+                                <td className="p-3 text-center font-bold border-l">{res?.total !== undefined ? Math.round(res.total) : '-'}</td>
+                                <td className="p-3 text-center"><GradeBadge grade={res?.grade || '-'} /></td>
+                                <td className="p-3 text-center font-bold">{res?.gpa.toFixed(2) || '-'}</td>
+                              </tr>
+                            </>
+                          );
+                        } else {
+                          return (
+                            <tr key={sub.subjectId}>
+                              <td className="p-3 font-medium">
+                                {sub.subjectName}
+                                {res?.isFourth && <span className="ml-2 text-xs text-muted-foreground">(4th Subject)</span>}
+                              </td>
+                              {resultMode === 'combined' ? (
+                                selectedExams.map(se => {
+                                  const breakdown = res?.examBreakdown?.[se.examId];
+                                  return (
+                                  <React.Fragment key={se.examId}>
+                                      <td className="p-3 text-center border-l text-xs">{breakdown ? breakdown.mcq.toFixed(2) : '-'}</td>
+                                      <td className="p-3 text-center text-xs">{breakdown ? breakdown.written.toFixed(2) : '-'}</td>
+                                  </React.Fragment>);
+                                })
+                              ) : (<>
+                                  <td className="p-3 text-center">{res?.mcq !== undefined ? res.mcq.toFixed(2) : '-'}</td>
+                                  <td className="p-3 text-center">{res?.written !== undefined ? res.written.toFixed(2) : '-'}</td>
+                              </>)}
+                              <td className="p-3 text-center font-medium border-l">{res?.total !== undefined ? Math.round(res.total) : '-'}</td>
+                              <td className="p-3 text-center"><GradeBadge grade={res?.grade || '-'} /></td>
+                              <td className="p-3 text-center">{res?.gpa.toFixed(2) || '-'}</td>
+                            </tr>
+                          );
+                        }
                       })}
                     </tbody>
                   </table>
@@ -809,9 +985,10 @@ export default function SchoolAdminResults() {
                   )}
 
                   {(() => {
-                    const subjects = Object.values(selectedStudentResult.subjectResults);
-                    const mandatorySubjects = subjects.filter(s => !s.isFourth);
-                    const fourthSubject = subjects.find(s => s.isFourth);
+                    const subjectsToConsider = (calculated ? displaySubjects : subjects)
+                      .map(s => selectedStudentResult.subjectResults[s.subjectId]).filter(Boolean);
+                    const mandatorySubjects = subjectsToConsider.filter(s => !s.isFourth);
+                    const fourthSubject = subjectsToConsider.find(s => s.isFourth);
                     
                     const totalMandatoryGPA = mandatorySubjects.reduce((sum, s) => sum + s.gpa, 0);
                     const mandatoryCount = mandatorySubjects.length;
