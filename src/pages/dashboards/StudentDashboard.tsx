@@ -392,13 +392,11 @@ function StudentResults() {
                       {schoolLogo && (
                         <img src={schoolLogo} alt="School Logo" className="h-24 mx-auto mb-4 object-contain" />
                       )}
-                      {schoolData && (
-                        <div className="mb-4">
-                          <h2 className="text-xl font-bold">{schoolData.schoolName}</h2>
-                          <p className="text-sm text-muted-foreground">{schoolData.address}, {schoolData.city}</p>
-                        </div>
-                      )}
+                      {schoolData && <h2 className="text-xl font-bold">{schoolData.schoolName}</h2>}
                       <h1 className="text-2xl font-bold uppercase tracking-wide mb-2">Academic Transcript</h1>
+                      {schoolData && (
+                        <p className="text-sm text-muted-foreground">{schoolData.address}, {schoolData.city}</p>
+                      )}
                       <div className="text-muted-foreground">
                         {result.examName}
                       </div>
@@ -444,19 +442,71 @@ function StudentResults() {
                           </tr>
                         </thead>
                         <tbody className="divide-y">
-                          {result.subjects.map((subject: any) => (
-                            <tr key={subject.subjectId}>
-                              <td className="p-3 font-medium">
-                                {subject.subjectName}
-                                {subject.isFourth && <span className="ml-2 text-xs text-muted-foreground">(4th Subject)</span>}
-                              </td>
-                              <td className="p-3 text-center">{liveMarks[`${result.id}_${subject.subjectId}`]?.mcq !== undefined ? liveMarks[`${result.id}_${subject.subjectId}`]?.mcq : (subject.mcq !== undefined ? subject.mcq : '-')}</td>
-                              <td className="p-3 text-center">{liveMarks[`${result.id}_${subject.subjectId}`]?.written !== undefined ? liveMarks[`${result.id}_${subject.subjectId}`]?.written : (subject.written !== undefined ? subject.written : '-')}</td>
-                              <td className="p-3 text-center font-medium">{subject.marksObtained}</td>
-                              <td className="p-3 text-center"><GradeBadge grade={subject.grade} /></td>
-                              <td className="p-3 text-center">{subject.gpa !== undefined ? subject.gpa.toFixed(2) : '-'}</td>
-                            </tr>
-                          ))}
+                          {(() => {
+                            const subjectGroups = result.subjectGroups || [];
+                            const allSubjects = result.subjects || [];
+                            const groupedSubjectIds = new Set(subjectGroups.flatMap((g: any) => g.subjectIds));
+                            
+                            // Filter to get display subjects (Groups + Non-grouped Individuals)
+                            // We filter out subjects that are part of a group, because they will be rendered under their group
+                            const displaySubjects = allSubjects.filter((s: any) => 
+                              s.subjectId.startsWith('group_') || !groupedSubjectIds.has(s.subjectId)
+                            );
+
+                            return displaySubjects.map((sub: any) => {
+                              const isGroup = sub.subjectId.startsWith('group_');
+                              
+                              if (isGroup) {
+                                const groupId = sub.subjectId.replace('group_', '');
+                                const group = subjectGroups.find((g: any) => g.id === groupId);
+                                if (!group) return null;
+
+                                const constituentSubjects = group.subjectIds.map((id: string) => 
+                                  allSubjects.find((s: any) => s.subjectId === id)
+                                ).filter(Boolean);
+
+                                return (
+                                  <>
+                                    {constituentSubjects.map((conSub: any, index: number) => (
+                                      <tr key={conSub.subjectId}>
+                                        <td className="p-3">
+                                          {index === 0 && <div className="font-medium">{sub.subjectName}</div>}
+                                          <div className="pl-4 text-sm text-muted-foreground">{conSub.subjectName}</div>
+                                        </td>
+                                        <td className="p-3 text-center">{conSub.mcq !== undefined ? conSub.mcq.toFixed(2) : '-'}</td>
+                                        <td className="p-3 text-center">{conSub.written !== undefined ? conSub.written.toFixed(2) : '-'}</td>
+                                        <td className="p-3 text-center border-l text-muted-foreground">{conSub.marksObtained !== undefined ? Math.round(conSub.marksObtained) : '-'}</td>
+                                        <td className="p-3 text-center"></td>
+                                        <td className="p-3 text-center"></td>
+                                      </tr>
+                                    ))}
+                                    <tr key={`${sub.subjectId}-total`} className="bg-muted/50 font-semibold">
+                                      <td className="p-3 text-right">Subject Total</td>
+                                      <td className="p-3 text-center">{sub.mcq !== undefined ? sub.mcq.toFixed(2) : '-'}</td>
+                                      <td className="p-3 text-center">{sub.written !== undefined ? sub.written.toFixed(2) : '-'}</td>
+                                      <td className="p-3 text-center font-bold border-l">{sub.marksObtained !== undefined ? Math.round(sub.marksObtained) : '-'}</td>
+                                      <td className="p-3 text-center"><GradeBadge grade={sub.grade || '-'} /></td>
+                                      <td className="p-3 text-center font-bold">{sub.gpa !== undefined ? sub.gpa.toFixed(2) : '-'}</td>
+                                    </tr>
+                                  </>
+                                );
+                              } else {
+                                return (
+                                  <tr key={sub.subjectId}>
+                                    <td className="p-3 font-medium">
+                                      {sub.subjectName}
+                                      {sub.isFourth && <span className="ml-2 text-xs text-muted-foreground">(4th Subject)</span>}
+                                    </td>
+                                    <td className="p-3 text-center">{sub.mcq !== undefined ? sub.mcq.toFixed(2) : '-'}</td>
+                                    <td className="p-3 text-center">{sub.written !== undefined ? sub.written.toFixed(2) : '-'}</td>
+                                    <td className="p-3 text-center font-medium border-l">{sub.marksObtained !== undefined ? Math.round(sub.marksObtained) : '-'}</td>
+                                    <td className="p-3 text-center"><GradeBadge grade={sub.grade} /></td>
+                                    <td className="p-3 text-center">{sub.gpa !== undefined ? sub.gpa.toFixed(2) : '-'}</td>
+                                  </tr>
+                                );
+                              }
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>

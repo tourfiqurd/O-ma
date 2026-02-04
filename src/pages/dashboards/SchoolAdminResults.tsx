@@ -56,6 +56,299 @@ interface ProcessedResult {
   failedSubjects: string[];
 }
 
+const TranscriptTemplate = ({ 
+  result, 
+  schoolLogo, 
+  schoolData, 
+  exams, 
+  selectedExams, 
+  resultMode, 
+  displaySubjects, 
+  subjects, 
+  subjectGroups 
+}: any) => {
+  return (
+    <div className="p-8 bg-white text-black h-full relative">
+      {schoolLogo && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0 overflow-hidden">
+          <img 
+            src={schoolLogo} 
+            alt="Watermark" 
+            className="w-[500px] h-[500px] object-contain opacity-[0.03] print:opacity-[0.05] grayscale transform -rotate-12" 
+          />
+        </div>
+      )}
+
+      <div className="text-center mb-8 relative z-10">
+        {schoolLogo && (
+          <img src={schoolLogo} alt="School Logo" className="h-24 mx-auto mb-4 object-contain" />
+        )}
+        {schoolData && <h2 className="text-xl font-bold">{schoolData.schoolName}</h2>}
+        <h1 className="text-2xl font-bold uppercase tracking-wide mb-2">Academic Transcript</h1>
+        {schoolData && (
+          <p className="text-sm text-muted-foreground">{schoolData.address}, {schoolData.city}</p>
+        )}
+        <div className="text-muted-foreground">
+          {exams.filter((e: any) => selectedExams.some((se: any) => se.examId === e.id)).map((e: any) => e.name).join(' & ')}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-8 p-4 bg-transparent rounded-lg border relative z-10">
+        <div>
+          <p className="text-sm text-muted-foreground">Student Name</p>
+          <p className="font-semibold">{result.studentName}</p>
+        </div>
+        <div>
+          <p className="text-sm text-muted-foreground">Roll Number</p>
+          <p className="font-semibold">{result.rollNumber}</p>
+        </div>
+        <div>
+          <p className="text-sm text-muted-foreground">Merit Position</p>
+          <p className="font-semibold">#{result.meritPosition}</p>
+        </div>
+        <div>
+          <p className="text-sm text-muted-foreground">Father's Name</p>
+          <p className="font-semibold">{result.fatherName}</p>
+        </div>
+        <div>
+          <p className="text-sm text-muted-foreground">Mother's Name</p>
+          <p className="font-semibold">{result.motherName}</p>
+        </div>
+        <div>
+          <p className="text-sm text-muted-foreground">Class & Section</p>
+          <p className="font-semibold">{result.className} - {result.sectionName}</p>
+        </div>
+      </div>
+
+      <div className="border rounded-lg overflow-hidden mb-8 relative z-10 bg-transparent">
+        <table className="w-full text-sm">
+          <thead className="bg-transparent">
+            <tr>
+              <th className="p-3 text-left" rowSpan={resultMode === 'combined' ? 2 : 1}>Subject</th>
+              {resultMode === 'combined' ? (
+                selectedExams.map((se: any) => {
+                  const examName = exams.find((e: any) => e.id === se.examId)?.name || 'Exam';
+                  return (
+                    <th key={se.examId} className="p-3 text-center border-l" colSpan={2}>
+                      {examName} <br/>
+                      <span className="text-[10px] font-normal text-muted-foreground">({se.weight}%)</span>
+                    </th>
+                  );
+                })
+              ) : (
+                <>
+                  <th className="p-3 text-center">MCQ</th>
+                  <th className="p-3 text-center">Written</th>
+                </>
+              )}
+              <th className="p-3 text-center border-l" rowSpan={resultMode === 'combined' ? 2 : 1}>Total</th>
+              <th className="p-3 text-center" rowSpan={resultMode === 'combined' ? 2 : 1}>Grade</th>
+              <th className="p-3 text-center" rowSpan={resultMode === 'combined' ? 2 : 1}>GPA</th>
+            </tr>
+            {resultMode === 'combined' && (
+              <tr>
+                {selectedExams.map((se: any) => (
+                  <React.Fragment key={se.examId}>
+                    <th className="p-1 text-center text-xs text-muted-foreground border-l border-t bg-muted/10">MCQ</th>
+                    <th className="p-1 text-center text-xs text-muted-foreground border-t bg-muted/10">Written</th>
+                  </React.Fragment>
+                ))}
+              </tr>
+            )}
+          </thead>
+          <tbody className="divide-y">
+            {displaySubjects.map((sub: any) => {
+              const isGroup = sub.subjectId.startsWith('group_');
+              const res = result.subjectResults[sub.subjectId];
+
+              if (isGroup) {
+                const groupId = sub.subjectId.replace('group_', '');
+                const group = subjectGroups.find((g: any) => g.id === groupId);
+                if (!group) return null;
+
+                const constituentSubjects = group.subjectIds.map((id: string) => {
+                  const originalSubject = subjects.find((s: any) => s.subjectId === id);
+                  const originalResult = result.subjectResults[id];
+                  return { ...originalSubject, result: originalResult };
+                }).filter((cs: any) => cs.result);
+
+                if (constituentSubjects.length === 0) return null;
+
+                return (
+                  <React.Fragment key={sub.subjectId}>
+                    {constituentSubjects.map((conSub: any, index: number) => (
+                      <tr key={conSub.subjectId}>
+                        <td className="p-3">
+                          {index === 0 && <div className="font-medium">{sub.subjectName}</div>}
+                          <div className="pl-4 text-sm text-muted-foreground">{conSub.subjectName}</div>
+                        </td>
+                        {resultMode === 'combined' ? (
+                          selectedExams.map((se: any) => {
+                            const breakdown = conSub.result?.examBreakdown?.[se.examId];
+                            return (
+                              <React.Fragment key={se.examId}>
+                                <td className="p-3 text-center border-l text-xs">{breakdown ? breakdown.mcq.toFixed(2) : '-'}</td>
+                                <td className="p-3 text-center text-xs">{breakdown ? breakdown.written.toFixed(2) : '-'}</td>
+                              </React.Fragment>
+                            );
+                          })
+                        ) : (
+                          <>
+                            <td className="p-3 text-center">{conSub.result?.mcq !== undefined ? conSub.result.mcq.toFixed(2) : '-'}</td>
+                            <td className="p-3 text-center">{conSub.result?.written !== undefined ? conSub.result.written.toFixed(2) : '-'}</td>
+                          </>
+                        )}
+                        <td className="p-3 text-center border-l text-muted-foreground">{conSub.result?.total !== undefined ? Math.round(conSub.result.total) : '-'}</td>
+                        <td className="p-3 text-center"></td>
+                        <td className="p-3 text-center"></td>
+                      </tr>
+                    ))}
+                    <tr key={`${sub.subjectId}-total`} className="bg-muted/50 font-semibold">
+                      <td className="p-3 text-right">Subject Total</td>
+                      {resultMode === 'combined' ? (
+                        selectedExams.map((se: any) => {
+                          const groupBreakdown = res?.examBreakdown?.[se.examId];
+                          return (
+                          <React.Fragment key={se.examId}>
+                            <td className="p-3 text-center border-l text-xs">{groupBreakdown ? groupBreakdown.mcq.toFixed(2) : '-'}</td>
+                            <td className="p-3 text-center text-xs">{groupBreakdown ? groupBreakdown.written.toFixed(2) : '-'}</td>
+                          </React.Fragment>);
+                        })
+                      ) : (<>
+                        <td className="p-3 text-center">{res?.mcq !== undefined ? res.mcq.toFixed(2) : '-'}</td>
+                        <td className="p-3 text-center">{res?.written !== undefined ? res.written.toFixed(2) : '-'}</td>
+                      </>)}
+                      <td className="p-3 text-center font-bold border-l">{res?.total !== undefined ? Math.round(res.total) : '-'}</td>
+                      <td className="p-3 text-center"><GradeBadge grade={res?.grade || '-'} /></td>
+                      <td className="p-3 text-center font-bold">{res?.gpa.toFixed(2) || '-'}</td>
+                    </tr>
+                  </React.Fragment>
+                );
+              } else {
+                return (
+                  <tr key={sub.subjectId}>
+                    <td className="p-3 font-medium">
+                      {sub.subjectName}
+                      {res?.isFourth && <span className="ml-2 text-xs text-muted-foreground">(4th Subject)</span>}
+                    </td>
+                    {resultMode === 'combined' ? (
+                      selectedExams.map((se: any) => {
+                        const breakdown = res?.examBreakdown?.[se.examId];
+                        return (
+                        <React.Fragment key={se.examId}>
+                            <td className="p-3 text-center border-l text-xs">{breakdown ? breakdown.mcq.toFixed(2) : '-'}</td>
+                            <td className="p-3 text-center text-xs">{breakdown ? breakdown.written.toFixed(2) : '-'}</td>
+                        </React.Fragment>);
+                      })
+                    ) : (<>
+                        <td className="p-3 text-center">{res?.mcq !== undefined ? res.mcq.toFixed(2) : '-'}</td>
+                        <td className="p-3 text-center">{res?.written !== undefined ? res.written.toFixed(2) : '-'}</td>
+                    </>)}
+                    <td className="p-3 text-center font-medium border-l">{res?.total !== undefined ? Math.round(res.total) : '-'}</td>
+                    <td className="p-3 text-center"><GradeBadge grade={res?.grade || '-'} /></td>
+                    <td className="p-3 text-center">{res?.gpa.toFixed(2) || '-'}</td>
+                  </tr>
+                );
+              }
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mb-8 p-4 bg-transparent rounded-lg border text-sm relative z-10">
+        <h3 className="font-semibold mb-2">Calculation Breakdown</h3>
+        
+        {resultMode === 'combined' && (
+          <div className="mb-4 p-3 bg-muted/30 rounded border text-xs">
+            <p className="font-semibold mb-1">Combined Result Calculation:</p>
+            <p>Total Marks = {selectedExams.map((se: any) => {
+              const examName = exams.find((e: any) => e.id === se.examId)?.name || 'Exam';
+              return `(${examName} × ${se.weight}%)`;
+            }).join(' + ')}</p>
+          </div>
+        )}
+
+        {(() => {
+          const subjectsToConsider = displaySubjects
+            .map((s: any) => result.subjectResults[s.subjectId]).filter(Boolean);
+          const mandatorySubjects = subjectsToConsider.filter((s: any) => !s.isFourth);
+          const fourthSubject = subjectsToConsider.find((s: any) => s.isFourth);
+          
+          const totalMandatoryGPA = mandatorySubjects.reduce((sum: number, s: any) => sum + s.gpa, 0);
+          const mandatoryCount = mandatorySubjects.length;
+          
+          let fourthSubjectBonus = 0;
+          if (fourthSubject && fourthSubject.gpa > 2.00) {
+            fourthSubjectBonus = fourthSubject.gpa - 2.00;
+          }
+
+          const calculatedGPA = mandatoryCount > 0 ? (totalMandatoryGPA + fourthSubjectBonus) / mandatoryCount : 0;
+
+          return (
+            <div className="space-y-1">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p><span className="text-muted-foreground">Total GPA (Mandatory):</span> {totalMandatoryGPA.toFixed(2)}</p>
+                  <p><span className="text-muted-foreground">Mandatory Subjects:</span> {mandatoryCount}</p>
+                </div>
+                <div>
+                  {fourthSubject && (
+                    <>
+                      <p><span className="text-muted-foreground">4th Subject GPA:</span> {fourthSubject.gpa.toFixed(2)}</p>
+                      <p><span className="text-muted-foreground">Bonus Points:</span> {fourthSubjectBonus.toFixed(2)} <span className="text-xs text-muted-foreground">({fourthSubject.gpa.toFixed(2)} - 2.00)</span></p>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="mt-2 pt-2 border-t">
+                <p className="font-medium">
+                  Formula: <span className="font-mono text-xs">({totalMandatoryGPA.toFixed(2)} + {fourthSubjectBonus.toFixed(2)}) / {mandatoryCount} = {calculatedGPA.toFixed(2)}</span>
+                </p>
+                {calculatedGPA > 5.00 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    * GPA capped at 5.00
+                  </p>
+                )}
+                {result.isFailed && (
+                  <p className="text-destructive font-medium mt-1">
+                    Result is Fail because student failed in: {result.failedSubjects.join(', ')}
+                  </p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      <div className="flex justify-end relative z-10">
+        <div className="bg-primary/5 p-6 rounded-lg border border-primary/10 min-w-[200px]">
+          <div className="space-y-2 text-right">
+            <div>
+              <span className="text-sm text-muted-foreground mr-4">Final GPA</span>
+              <span className="text-2xl font-bold">{result.finalGPA.toFixed(2)}</span>
+            </div>
+            <div className="flex items-center justify-end gap-4">
+              <span className="text-sm text-muted-foreground">Final Grade</span>
+              <GradeBadge grade={result.finalGrade} className="text-lg px-3 py-1" />
+            </div>
+            {result.isFailed && (
+              <div className="text-destructive font-medium text-sm mt-2">
+                Result: Failed
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      
+      <div className="mt-16 grid grid-cols-3 gap-8 text-center text-sm text-muted-foreground relative z-10">
+        <div className="border-t pt-2">Class Teacher</div>
+        <div className="border-t pt-2">Principal</div>
+        <div className="border-t pt-2">Guardian</div>
+      </div>
+    </div>
+  );
+};
+
 export default function SchoolAdminResults() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -84,9 +377,11 @@ export default function SchoolAdminResults() {
   const [showMarks, setShowMarks] = useState(false);
   const [selectedStudentResult, setSelectedStudentResult] = useState<ProcessedResult | null>(null);
   const [schoolLogo, setSchoolLogo] = useState<string | null>(null);
+  const [schoolData, setSchoolData] = useState<any>(null);
   const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
   const [subjectGroups, setSubjectGroups] = useState<SubjectGroup[]>([]);
   const [displaySubjects, setDisplaySubjects] = useState<any[]>([]);
+  const [isPrintingAll, setIsPrintingAll] = useState(false);
 
   // Fetch Initial Data
   useEffect(() => {
@@ -103,9 +398,11 @@ export default function SchoolAdminResults() {
         setExams(data ? Object.entries(data).map(([k, v]: [string, any]) => ({ id: k, ...v })) : []);
       });
 
-      const logoRef = ref(database, `school_registrations/${user.schoolId}/logo`);
-      onValue(logoRef, (snapshot) => {
-        setSchoolLogo(snapshot.val());
+      const schoolRef = ref(database, `school_registrations/${user.schoolId}`);
+      onValue(schoolRef, (snapshot) => {
+        const data = snapshot.val();
+        setSchoolData(data);
+        if (data?.logo) setSchoolLogo(data.logo);
       });
     }
   }, [user?.schoolId]);
@@ -481,13 +778,16 @@ export default function SchoolAdminResults() {
         resultKey = `combined_${Date.now()}`;
       }
 
-      const subjectsToPublish = calculated ? displaySubjects : subjects;
+      // Prepare subjects to save (Display Subjects + Constituents)
+      const groupedSubjectIds = new Set(subjectGroups.flatMap(g => g.subjectIds));
+      const constituentSubjects = subjects.filter(s => groupedSubjectIds.has(s.subjectId));
+      const subjectsToPublish = [...(calculated ? displaySubjects : subjects), ...constituentSubjects];
 
       results.forEach(result => {
         const studentSubjects = subjectsToPublish.map(sub => {
           const subRes = result.subjectResults[sub.subjectId];
-          const maxMCQ = parseFloat(sub.mcqMarks || '0');
-          const maxWritten = parseFloat(sub.writtenMarks || '0');
+          const maxMCQ = parseFloat(String(sub.mcqMarks || '0'));
+          const maxWritten = parseFloat(String(sub.writtenMarks || '0'));
           const maxMarks = maxMCQ + maxWritten;
           
           return {
@@ -499,7 +799,8 @@ export default function SchoolAdminResults() {
             mcq: subRes ? subRes.mcq : 0,
             written: subRes ? subRes.written : 0,
             gpa: subRes ? subRes.gpa : 0,
-            isFourth: subRes ? subRes.isFourth : false
+            isFourth: subRes ? subRes.isFourth : false,
+            examBreakdown: subRes ? subRes.examBreakdown : {}
           };
         });
 
@@ -525,7 +826,8 @@ export default function SchoolAdminResults() {
           rollNumber: result.rollNumber,
           fatherName: result.fatherName,
           motherName: result.motherName,
-          meritPosition: result.meritPosition
+          meritPosition: result.meritPosition,
+          subjectGroups: subjectGroups
         };
 
         updates[`/student_results/${result.studentId}/${resultKey}`] = resultData;
@@ -540,6 +842,26 @@ export default function SchoolAdminResults() {
       setLoading(false);
     }
   };
+
+  const handlePrintAll = () => {
+    setIsPrintingAll(true);
+    setTimeout(() => {
+      window.print();
+      setIsPrintingAll(false);
+    }, 500);
+  };
+
+  if (isPrintingAll) {
+    return (
+      <div className="bg-white">
+        {results.map((result) => (
+          <div key={result.studentId} className="min-h-screen print:break-after-page">
+            <TranscriptTemplate result={result} schoolLogo={schoolLogo} schoolData={schoolData} exams={exams} selectedExams={selectedExams} resultMode={resultMode} displaySubjects={calculated ? displaySubjects : subjects} subjects={subjects} subjectGroups={subjectGroups} />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <DashboardLayout navItems={navItems} title="Results" logo={schoolLogo}>
@@ -666,6 +988,9 @@ export default function SchoolAdminResults() {
               <Button variant="outline" size="sm" onClick={() => window.print()}>
                 <Printer className="h-4 w-4 mr-2" /> Print Sheet
               </Button>
+              <Button variant="outline" size="sm" onClick={handlePrintAll}>
+                <Printer className="h-4 w-4 mr-2" /> Print All Transcripts
+              </Button>
               <Button size="sm" variant="outline" onClick={() => setIsMergeModalOpen(true)}>
                 Merge Subject
               </Button>
@@ -787,280 +1112,17 @@ export default function SchoolAdminResults() {
               </div>
               
               <div className="p-8 overflow-y-auto print:overflow-visible">
-                {schoolLogo && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0 overflow-hidden">
-                    <img 
-                      src={schoolLogo} 
-                      alt="Watermark" 
-                      className="w-[500px] h-[500px] object-contain opacity-[0.03] print:opacity-[0.05] grayscale transform -rotate-12" 
-                    />
-                  </div>
-                )}
-
-                <div className="text-center mb-8 relative z-10">
-                  {schoolLogo && (
-                    <img src={schoolLogo} alt="School Logo" className="h-24 mx-auto mb-4 object-contain" />
-                  )}
-                  <h1 className="text-2xl font-bold uppercase tracking-wide mb-2">Academic Transcript</h1>
-                  <div className="text-muted-foreground">
-                    {exams.filter(e => selectedExams.some(se => se.examId === e.id)).map(e => e.name).join(' & ')}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-8 p-4 bg-transparent rounded-lg border relative z-10">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Student Name</p>
-                    <p className="font-semibold">{selectedStudentResult.studentName}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Roll Number</p>
-                    <p className="font-semibold">{selectedStudentResult.rollNumber}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Merit Position</p>
-                    <p className="font-semibold">#{selectedStudentResult.meritPosition}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Father's Name</p>
-                    <p className="font-semibold">{selectedStudentResult.fatherName}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Mother's Name</p>
-                    <p className="font-semibold">{selectedStudentResult.motherName}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Class & Section</p>
-                    <p className="font-semibold">{selectedStudentResult.className} - {selectedStudentResult.sectionName}</p>
-                  </div>
-                </div>
-
-                <div className="border rounded-lg overflow-hidden mb-8 relative z-10 bg-transparent">
-                  <table className="w-full text-sm">
-                    <thead className="bg-transparent">
-                      <tr>
-                        <th className="p-3 text-left" rowSpan={resultMode === 'combined' ? 2 : 1}>Subject</th>
-                        {resultMode === 'combined' ? (
-                          selectedExams.map(se => {
-                            const examName = exams.find(e => e.id === se.examId)?.name || 'Exam';
-                            return (
-                              <th key={se.examId} className="p-3 text-center border-l" colSpan={2}>
-                                {examName} <br/>
-                                <span className="text-[10px] font-normal text-muted-foreground">({se.weight}%)</span>
-                              </th>
-                            );
-                          })
-                        ) : (
-                          <>
-                            <th className="p-3 text-center">MCQ</th>
-                            <th className="p-3 text-center">Written</th>
-                          </>
-                        )}
-                        <th className="p-3 text-center border-l" rowSpan={resultMode === 'combined' ? 2 : 1}>Total</th>
-                        <th className="p-3 text-center" rowSpan={resultMode === 'combined' ? 2 : 1}>Grade</th>
-                        <th className="p-3 text-center" rowSpan={resultMode === 'combined' ? 2 : 1}>GPA</th>
-                      </tr>
-                      {resultMode === 'combined' && (
-                        <tr>
-                          {selectedExams.map(se => (
-                            <React.Fragment key={se.examId}>
-                              <th className="p-1 text-center text-xs text-muted-foreground border-l border-t bg-muted/10">MCQ</th>
-                              <th className="p-1 text-center text-xs text-muted-foreground border-t bg-muted/10">Written</th>
-                            </React.Fragment>
-                          ))}
-                        </tr>
-                      )}
-                    </thead>
-                    <tbody className="divide-y">
-                      {(calculated ? displaySubjects : subjects).map(sub => {
-                        const isGroup = sub.subjectId.startsWith('group_');
-                        const res = selectedStudentResult.subjectResults[sub.subjectId]; // This is the result for the current item (group or individual subject)
-
-                        if (isGroup) {
-                          const groupId = sub.subjectId.replace('group_', '');
-                          const group = subjectGroups.find(g => g.id === groupId);
-                          if (!group) return null;
-
-                          // res is already the groupResult
-
-                          const constituentSubjects = group.subjectIds.map(id => {
-                            const originalSubject = subjects.find(s => s.subjectId === id);
-                            const originalResult = selectedStudentResult.subjectResults[id];
-                            return { ...originalSubject, result: originalResult };
-                          }).filter(cs => cs.result);
-
-                          if (constituentSubjects.length === 0) return null;
-
-                          return (
-                            <>
-                              {constituentSubjects.map((conSub, index) => (
-                                <tr key={conSub.subjectId}>
-                                  <td className="p-3">
-                                    {index === 0 && <div className="font-medium">{sub.subjectName}</div>}
-                                    <div className="pl-4 text-sm text-muted-foreground">{conSub.subjectName}</div>
-                                  </td>
-                                  {resultMode === 'combined' ? (
-                                    selectedExams.map(se => {
-                                      const breakdown = conSub.result?.examBreakdown?.[se.examId];
-                                      return (
-                                        <React.Fragment key={se.examId}>
-                                          <td className="p-3 text-center border-l text-xs">{breakdown ? breakdown.mcq.toFixed(2) : '-'}</td>
-                                          <td className="p-3 text-center text-xs">{breakdown ? breakdown.written.toFixed(2) : '-'}</td>
-                                        </React.Fragment>
-                                      );
-                                    })
-                                  ) : (
-                                    <>
-                                      <td className="p-3 text-center">{conSub.result?.mcq !== undefined ? conSub.result.mcq.toFixed(2) : '-'}</td>
-                                      <td className="p-3 text-center">{conSub.result?.written !== undefined ? conSub.result.written.toFixed(2) : '-'}</td>
-                                    </>
-                                  )}
-                                  <td className="p-3 text-center border-l text-muted-foreground">{conSub.result?.total !== undefined ? Math.round(conSub.result.total) : '-'}</td>
-                                  <td className="p-3 text-center"></td>
-                                  <td className="p-3 text-center"></td>
-                                </tr>
-                              ))}
-                              <tr key={`${sub.subjectId}-total`} className="bg-muted/50 font-semibold">
-                                <td className="p-3 text-right">Subject Total</td>
-                                {resultMode === 'combined' ? (
-                                  selectedExams.map(se => {
-                                    const groupBreakdown = res?.examBreakdown?.[se.examId];
-                                    return (
-                                    <React.Fragment key={se.examId}>
-                                      <td className="p-3 text-center border-l text-xs">{groupBreakdown ? groupBreakdown.mcq.toFixed(2) : '-'}</td>
-                                      <td className="p-3 text-center text-xs">{groupBreakdown ? groupBreakdown.written.toFixed(2) : '-'}</td>
-                                    </React.Fragment>);
-                                  })
-                                ) : (<>
-                                  <td className="p-3 text-center">{res?.mcq !== undefined ? res.mcq.toFixed(2) : '-'}</td>
-                                  <td className="p-3 text-center">{res?.written !== undefined ? res.written.toFixed(2) : '-'}</td>
-                                </>)}
-                                <td className="p-3 text-center font-bold border-l">{res?.total !== undefined ? Math.round(res.total) : '-'}</td>
-                                <td className="p-3 text-center"><GradeBadge grade={res?.grade || '-'} /></td>
-                                <td className="p-3 text-center font-bold">{res?.gpa.toFixed(2) || '-'}</td>
-                              </tr>
-                            </>
-                          );
-                        } else {
-                          return (
-                            <tr key={sub.subjectId}>
-                              <td className="p-3 font-medium">
-                                {sub.subjectName}
-                                {res?.isFourth && <span className="ml-2 text-xs text-muted-foreground">(4th Subject)</span>}
-                              </td>
-                              {resultMode === 'combined' ? (
-                                selectedExams.map(se => {
-                                  const breakdown = res?.examBreakdown?.[se.examId];
-                                  return (
-                                  <React.Fragment key={se.examId}>
-                                      <td className="p-3 text-center border-l text-xs">{breakdown ? breakdown.mcq.toFixed(2) : '-'}</td>
-                                      <td className="p-3 text-center text-xs">{breakdown ? breakdown.written.toFixed(2) : '-'}</td>
-                                  </React.Fragment>);
-                                })
-                              ) : (<>
-                                  <td className="p-3 text-center">{res?.mcq !== undefined ? res.mcq.toFixed(2) : '-'}</td>
-                                  <td className="p-3 text-center">{res?.written !== undefined ? res.written.toFixed(2) : '-'}</td>
-                              </>)}
-                              <td className="p-3 text-center font-medium border-l">{res?.total !== undefined ? Math.round(res.total) : '-'}</td>
-                              <td className="p-3 text-center"><GradeBadge grade={res?.grade || '-'} /></td>
-                              <td className="p-3 text-center">{res?.gpa.toFixed(2) || '-'}</td>
-                            </tr>
-                          );
-                        }
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="mb-8 p-4 bg-transparent rounded-lg border text-sm relative z-10">
-                  <h3 className="font-semibold mb-2">Calculation Breakdown</h3>
-                  
-                  {resultMode === 'combined' && (
-                    <div className="mb-4 p-3 bg-muted/30 rounded border text-xs">
-                      <p className="font-semibold mb-1">Combined Result Calculation:</p>
-                      <p>Total Marks = {selectedExams.map(se => {
-                        const examName = exams.find(e => e.id === se.examId)?.name || 'Exam';
-                        return `(${examName} × ${se.weight}%)`;
-                      }).join(' + ')}</p>
-                    </div>
-                  )}
-
-                  {(() => {
-                    const subjectsToConsider = (calculated ? displaySubjects : subjects)
-                      .map(s => selectedStudentResult.subjectResults[s.subjectId]).filter(Boolean);
-                    const mandatorySubjects = subjectsToConsider.filter(s => !s.isFourth);
-                    const fourthSubject = subjectsToConsider.find(s => s.isFourth);
-                    
-                    const totalMandatoryGPA = mandatorySubjects.reduce((sum, s) => sum + s.gpa, 0);
-                    const mandatoryCount = mandatorySubjects.length;
-                    
-                    let fourthSubjectBonus = 0;
-                    if (fourthSubject && fourthSubject.gpa > 2.00) {
-                      fourthSubjectBonus = fourthSubject.gpa - 2.00;
-                    }
-
-                    const calculatedGPA = mandatoryCount > 0 ? (totalMandatoryGPA + fourthSubjectBonus) / mandatoryCount : 0;
-
-                    return (
-                      <div className="space-y-1">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p><span className="text-muted-foreground">Total GPA (Mandatory):</span> {totalMandatoryGPA.toFixed(2)}</p>
-                            <p><span className="text-muted-foreground">Mandatory Subjects:</span> {mandatoryCount}</p>
-                          </div>
-                          <div>
-                            {fourthSubject && (
-                              <>
-                                <p><span className="text-muted-foreground">4th Subject GPA:</span> {fourthSubject.gpa.toFixed(2)}</p>
-                                <p><span className="text-muted-foreground">Bonus Points:</span> {fourthSubjectBonus.toFixed(2)} <span className="text-xs text-muted-foreground">({fourthSubject.gpa.toFixed(2)} - 2.00)</span></p>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="mt-2 pt-2 border-t">
-                          <p className="font-medium">
-                            Formula: <span className="font-mono text-xs">({totalMandatoryGPA.toFixed(2)} + {fourthSubjectBonus.toFixed(2)}) / {mandatoryCount} = {calculatedGPA.toFixed(2)}</span>
-                          </p>
-                          {calculatedGPA > 5.00 && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              * GPA capped at 5.00
-                            </p>
-                          )}
-                          {selectedStudentResult.isFailed && (
-                            <p className="text-destructive font-medium mt-1">
-                              Result is Fail because student failed in: {selectedStudentResult.failedSubjects.join(', ')}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                <div className="flex justify-end relative z-10">
-                  <div className="bg-primary/5 p-6 rounded-lg border border-primary/10 min-w-[200px]">
-                    <div className="space-y-2 text-right">
-                      <div>
-                        <span className="text-sm text-muted-foreground mr-4">Final GPA</span>
-                        <span className="text-2xl font-bold">{selectedStudentResult.finalGPA.toFixed(2)}</span>
-                      </div>
-                      <div className="flex items-center justify-end gap-4">
-                        <span className="text-sm text-muted-foreground">Final Grade</span>
-                        <GradeBadge grade={selectedStudentResult.finalGrade} className="text-lg px-3 py-1" />
-                      </div>
-                      {selectedStudentResult.isFailed && (
-                        <div className="text-destructive font-medium text-sm mt-2">
-                          Result: Failed
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="mt-16 grid grid-cols-3 gap-8 text-center text-sm text-muted-foreground relative z-10">
-                  <div className="border-t pt-2">Class Teacher</div>
-                  <div className="border-t pt-2">Principal</div>
-                  <div className="border-t pt-2">Guardian</div>
-                </div>
+                <TranscriptTemplate 
+                  result={selectedStudentResult} 
+                  schoolLogo={schoolLogo} 
+                  schoolData={schoolData} 
+                  exams={exams} 
+                  selectedExams={selectedExams} 
+                  resultMode={resultMode} 
+                  displaySubjects={calculated ? displaySubjects : subjects} 
+                  subjects={subjects} 
+                  subjectGroups={subjectGroups} 
+                />
               </div>
             </div>
           </div>
